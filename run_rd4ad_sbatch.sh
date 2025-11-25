@@ -31,10 +31,10 @@ export PYTHONUNBUFFERED=1
 
 DATA_ROOT="/work/zc199/CV/mvtec"   # 修改为你的 MVTec 数据集路径
 export DATA_ROOT
+CLASS_LIST="${CLASS_LIST:-}"        # 可选：逗号分隔的类别列表；留空则自动检测 data_root 下的子目录
 DATA_LINK="${REPO_DIR}/mvtec"
 RESULTS_DIR="${REPO_DIR}/job_outputs/${SLURM_JOB_ID:-manual_run}"
 RUN_EVAL="${RUN_EVAL:-1}"
-CLASS_LIST=(carpet bottle hazelnut leather cable capsule grid pill transistor metal_nut screw toothbrush zipper tile wood)
 
 # 若需要，将数据集路径链接到项目根目录（main.py 默认读取 ./mvtec）
 if [ ! -e "$DATA_LINK" ]; then
@@ -45,18 +45,38 @@ fi
 # 3. 运行 RD4AD 主程序
 # -----------------------------
 echo "Running RD4AD with main.py defaults..."
-python main.py
+MAIN_ARGS=(--data_root "$DATA_ROOT" --epochs 40 --batch_size 16 --lr 0.005)
+if [[ -n "$CLASS_LIST" ]]; then
+  MAIN_ARGS+=(--classes "$CLASS_LIST")
+fi
+python main.py "${MAIN_ARGS[@]}"
 
 if [ "$RUN_EVAL" -eq 1 ]; then
   echo "Running evaluation for trained classes..."
   python - <<'PY'
+import os
 from test import test
 
-classes = ["carpet", "bottle", "hazelnut", "leather", "cable", "capsule", "grid", "pill",
-           "transistor", "metal_nut", "screw", "toothbrush", "zipper", "tile", "wood"]
+CLASS_LIST = os.environ.get("CLASS_LIST")
+data_root = os.environ.get("DATA_ROOT", "./mvtec")
+
+if CLASS_LIST:
+    classes = [c.strip() for c in CLASS_LIST.split(',') if c.strip()]
+else:
+    classes = [
+        d for d in sorted(os.listdir(data_root))
+        if os.path.isdir(os.path.join(data_root, d))
+    ]
+    if not classes:
+        classes = ["carpet", "bottle", "hazelnut", "leather", "cable", "capsule", "grid", "pill",
+                   "transistor", "metal_nut", "screw", "toothbrush", "zipper", "tile", "wood"]
 
 for cls in classes:
-    test(cls)
+    ckpt = os.path.join('./checkpoints', f'wres50_{cls}.pth')
+    if os.path.exists(ckpt):
+        test(cls)
+    else:
+        print(f"[skip] checkpoint not found for class '{cls}' at {ckpt}")
 PY
 fi
 
