@@ -23,6 +23,7 @@ import matplotlib
 import pickle
 import csv
 import time
+import os
 
 def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
     if amap_mode == 'mul':
@@ -123,8 +124,9 @@ def test(_class_):
     print(_class_)
 
     data_transform, gt_transform = get_data_transforms(256, 256)
-    test_path = '../mvtec/' + _class_
-    ckp_path = './checkpoints/' + 'rm_1105_wres50_ff_mm_' + _class_ + '.pth'
+    data_root = os.getenv('DATA_ROOT', './mvtec')
+    test_path = os.path.join(data_root, _class_)
+    ckp_path = os.path.join('./checkpoints', f'wres50_{_class_}.pth')
     test_data = MVTecDataset(root=test_path, transform=data_transform, gt_transform=gt_transform, phase="test")
     test_dataloader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False)
     encoder, bn = wide_resnet50_2(pretrained=True)
@@ -153,16 +155,15 @@ def test(_class_):
         writer.writerow([_class_, auroc_px, auroc_sp, aupro_px, avg_time])
     return auroc_px
 
-import os
-
 def visualization(_class_):
     print(_class_)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(device)
 
     data_transform, gt_transform = get_data_transforms(256, 256)
-    test_path = '../mvtec/' + _class_
-    ckp_path = './checkpoints/' + 'rm_1105_wres50_ff_mm_'+_class_+'.pth'
+    data_root = os.getenv('DATA_ROOT', './mvtec')
+    test_path = os.path.join(data_root, _class_)
+    ckp_path = os.path.join('./checkpoints', f'wres50_{_class_}.pth')
     test_data = MVTecDataset(root=test_path, transform=data_transform, gt_transform=gt_transform, phase="test")
     test_dataloader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False)
 
