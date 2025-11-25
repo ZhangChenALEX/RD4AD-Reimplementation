@@ -21,6 +21,7 @@ from matplotlib.ticker import NullFormatter
 from scipy.spatial.distance import pdist
 import matplotlib
 import pickle
+import csv
 
 def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
     if amap_mode == 'mul':
@@ -130,6 +131,16 @@ def test(_class_):
     bn.load_state_dict(ckp['bn'])
     auroc_px, auroc_sp, aupro_px = evaluation(encoder, bn, decoder, test_dataloader, device,_class_)
     print(_class_,':',auroc_px,',',auroc_sp,',',aupro_px)
+    log_dir = './logs'
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, 'test_metrics.csv')
+    if not os.path.exists(log_path):
+        with open(log_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['class', 'pixel_auroc', 'sample_auroc', 'pixel_aupro'])
+    with open(log_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([_class_, auroc_px, auroc_sp, aupro_px])
     return auroc_px
 
 import os
