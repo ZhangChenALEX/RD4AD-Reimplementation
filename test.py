@@ -21,6 +21,9 @@ from matplotlib.ticker import NullFormatter
 from scipy.spatial.distance import pdist
 import matplotlib
 import pickle
+import csv
+import time
+import os
 
 def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
     if amap_mode == 'mul':
@@ -74,6 +77,10 @@ def evaluation(encoder, bn, decoder, dataloader,device,_class_=None):
     gt_list_sp = []
     pr_list_sp = []
     aupro_list = []
+    num_images = 0
+    if device.startswith('cuda') and torch.cuda.is_available():
+        torch.cuda.synchronize()
+    start_time = time.perf_counter()
     with torch.no_grad():
         for img, gt, label, _ in dataloader:
 
@@ -91,6 +98,7 @@ def evaluation(encoder, bn, decoder, dataloader,device,_class_=None):
             pr_list_px.extend(anomaly_map.ravel())
             gt_list_sp.append(np.max(gt.cpu().numpy().astype(int)))
             pr_list_sp.append(np.max(anomaly_map))
+            num_images += img.size(0)
 
         #ano_score = (pr_list_sp - np.min(pr_list_sp)) / (np.max(pr_list_sp) - np.min(pr_list_sp))
         #vis_data = {}
@@ -101,10 +109,14 @@ def evaluation(encoder, bn, decoder, dataloader,device,_class_=None):
         #with open('{}_vis.pkl'.format(_class_), 'wb') as f:
         #    pickle.dump(vis_data, f, pickle.HIGHEST_PROTOCOL)
 
+        if device.startswith('cuda') and torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elapsed = time.perf_counter() - start_time
 
         auroc_px = round(roc_auc_score(gt_list_px, pr_list_px), 3)
         auroc_sp = round(roc_auc_score(gt_list_sp, pr_list_sp), 3)
-    return auroc_px, auroc_sp, round(np.mean(aupro_list),3)
+    avg_time = elapsed / max(num_images, 1)
+    return auroc_px, auroc_sp, round(np.mean(aupro_list),3), avg_time
 
 def test(_class_):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -112,8 +124,9 @@ def test(_class_):
     print(_class_)
 
     data_transform, gt_transform = get_data_transforms(256, 256)
-    test_path = '../mvtec/' + _class_
-    ckp_path = './checkpoints/' + 'rm_1105_wres50_ff_mm_' + _class_ + '.pth'
+    data_root = os.getenv('DATA_ROOT', './mvtec')
+    test_path = os.path.join(data_root, _class_)
+    ckp_path = os.path.join('./checkpoints', f'wres50_{_class_}.pth')
     test_data = MVTecDataset(root=test_path, transform=data_transform, gt_transform=gt_transform, phase="test")
     test_dataloader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False)
     encoder, bn = wide_resnet50_2(pretrained=True)
@@ -128,11 +141,19 @@ def test(_class_):
             ckp['bn'].pop(k)
     decoder.load_state_dict(ckp['decoder'])
     bn.load_state_dict(ckp['bn'])
-    auroc_px, auroc_sp, aupro_px = evaluation(encoder, bn, decoder, test_dataloader, device,_class_)
-    print(_class_,':',auroc_px,',',auroc_sp,',',aupro_px)
+    auroc_px, auroc_sp, aupro_px, avg_time = evaluation(encoder, bn, decoder, test_dataloader, device,_class_)
+    print(_class_,':',auroc_px,',',auroc_sp,',',aupro_px, ', avg_time:', round(avg_time, 4), 's/img')
+    log_dir = './logs'
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, 'test_metrics.csv')
+    if not os.path.exists(log_path):
+        with open(log_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['class', 'pixel_auroc', 'sample_auroc', 'pixel_aupro', 'avg_inference_time_s'])
+    with open(log_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([_class_, auroc_px, auroc_sp, aupro_px, avg_time])
     return auroc_px
-
-import os
 
 def visualization(_class_):
     print(_class_)
@@ -140,8 +161,9 @@ def visualization(_class_):
     print(device)
 
     data_transform, gt_transform = get_data_transforms(256, 256)
-    test_path = '../mvtec/' + _class_
-    ckp_path = './checkpoints/' + 'rm_1105_wres50_ff_mm_'+_class_+'.pth'
+    data_root = os.getenv('DATA_ROOT', './mvtec')
+    test_path = os.path.join(data_root, _class_)
+    ckp_path = os.path.join('./checkpoints', f'wres50_{_class_}.pth')
     test_data = MVTecDataset(root=test_path, transform=data_transform, gt_transform=gt_transform, phase="test")
     test_dataloader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False)
 
