@@ -17,6 +17,8 @@ import torch.backends.cudnn as cudnn
 import argparse
 from test import evaluation, visualization, test
 from torch.nn import functional as F
+import csv
+import time
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -72,6 +74,15 @@ def train(_class_):
     train_path = './mvtec/' + _class_ + '/train'
     test_path = './mvtec/' + _class_
     ckp_path = './checkpoints/' + 'wres50_'+_class_+'.pth'
+    log_dir = './logs'
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, f'{_class_}_train_metrics.csv')
+    best_path = os.path.join(log_dir, f'{_class_}_train_best.txt')
+    if not os.path.exists(log_path):
+        with open(log_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['epoch', 'pixel_auroc', 'sample_auroc', 'pixel_aupro', 'avg_inference_time_s'])
+    best_metrics = {'pixel_auroc': 0, 'sample_auroc': 0, 'pixel_aupro': 0, 'epoch': 0}
     train_data = ImageFolder(root=train_path, transform=data_transform)
     test_data = MVTecDataset(root=test_path, transform=data_transform, gt_transform=gt_transform, phase="test")
     train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
@@ -102,11 +113,20 @@ def train(_class_):
             loss_list.append(loss.item())
         print('epoch [{}/{}], loss:{:.4f}'.format(epoch + 1, epochs, np.mean(loss_list)))
         if (epoch + 1) % 10 == 0:
-            auroc_px, auroc_sp, aupro_px = evaluation(encoder, bn, decoder, test_dataloader, device)
-            print('Pixel Auroc:{:.3f}, Sample Auroc{:.3f}, Pixel Aupro{:.3}'.format(auroc_px, auroc_sp, aupro_px))
+            auroc_px, auroc_sp, aupro_px, avg_time = evaluation(encoder, bn, decoder, test_dataloader, device)
+            print('Pixel Auroc:{:.3f}, Sample Auroc{:.3f}, Pixel Aupro{:.3}, Inference Time/Image:{:.3f}s'.format(
+                auroc_px, auroc_sp, aupro_px, avg_time))
+            with open(log_path, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch + 1, auroc_px, auroc_sp, aupro_px, avg_time])
+            if auroc_px > best_metrics['pixel_auroc'] or auroc_sp > best_metrics['sample_auroc'] or aupro_px > best_metrics['pixel_aupro']:
+                best_metrics = {'pixel_auroc': auroc_px, 'sample_auroc': auroc_sp, 'pixel_aupro': aupro_px, 'epoch': epoch + 1}
+                with open(best_path, 'w') as f:
+                    f.write('Best metrics at epoch {}\n'.format(epoch + 1))
+                    f.write('Pixel AUROC: {:.3f}\nSample AUROC: {:.3f}\nPixel AUPRO: {:.3f}\n'.format(auroc_px, auroc_sp, aupro_px))
             torch.save({'bn': bn.state_dict(),
                         'decoder': decoder.state_dict()}, ckp_path)
-    return auroc_px, auroc_sp, aupro_px
+    return auroc_px, auroc_sp, aupro_px, avg_time
 
 
 
